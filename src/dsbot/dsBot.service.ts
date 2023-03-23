@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ButtonStyle, ChannelType, Client, GatewayIntentBits } from 'discord.js';
+import { ChannelType, Client, GatewayIntentBits, GuildTextBasedChannel, Message } from 'discord.js';
 import { CommandHandler } from './command.handler';
 import { GptService } from '../gpt/gpt.service';
 
@@ -8,7 +8,11 @@ export class DsBotService {
 	private readonly client: Client;
 	generating = false;
 
-	private listeningChannels: string[] = ['1087826190204674190'];
+	private readonly PARENT_CHANNEL_ID = '772692848529244191';
+	private readonly ORCHESTRATOR_CHANNEL_ID = '1087790921992642742';
+	private readonly NO_HISTORY_CHANNEL_ID = '1088183220153094285';
+
+	private readonly basicHistory = [{ 'role': 'system', 'content': 'You are a helpful assistant.' }];
 
 	constructor(private readonly commandHandler: CommandHandler,
 				private readonly gptService: GptService) {
@@ -19,34 +23,71 @@ export class DsBotService {
 		});
 
 		this.client.on('interactionCreate', async interaction => {
-
 			if (!interaction.isButton()) return;
 
+			const today = new Date();
 			if (interaction.customId == 'createConversation') {
-				const createdChannel = await interaction.guild.channels.create({
-					name: interaction.user.username,
+				await interaction.guild.channels.create({
+					name: `${today.getDate()}-${today.getMonth() + 1}-${today.getFullYear().toString().substring(2)}_${today.getHours()}-${today.getMinutes()}`,
 					type: ChannelType.GuildText,
 					parent: interaction.channel.parentId,
 				});
-				this.listeningChannels.push(createdChannel.id);
 			}
 		});
 
 		this.client.on('messageCreate', async msg => {
 			const content = msg.content;
 			if (content.startsWith('!')) this.commandHandler.handle(content);
-			if (this.listeningChannels.includes(msg.channelId) && !msg.author.bot) {
+
+			const channelMessages = await msg.channel.messages.fetch();
+
+			const at = msg.channel.messages.valueOf().at(1);
+			if (at !== undefined && at.author.bot && at.content.startsWith('[x]')){
+				await msg.delete();
+				return;
+			}
+
+			const channelId = msg.channelId;
+			const parentId = (msg.channel as GuildTextBasedChannel).parentId;
+			if (parentId === this.PARENT_CHANNEL_ID && channelId !== this.ORCHESTRATOR_CHANNEL_ID && !msg.author.bot) {
 				if (this.generating) {
-					await msg.reply('msg already generating');
+					await msg.delete();
 					return;
 				}
-				const generationMsg = await msg.reply('Generating...');
+				const generationMsg = await msg.reply('[#]Generating...');
 
 				this.generating = true;
 
-				const response = await this.gptService.ask(content);
+				let history = this.basicHistory.slice();
+				if (channelId === this.NO_HISTORY_CHANNEL_ID) {
+					history.push({ 'role': 'user', 'content': content });
+				} else {
+					for (const v of channelMessages.reverse()) {
+						const msg = v[1] as Message;
+						if (msg.content.startsWith('[#]')) continue;
+
+						if (msg.author.bot && msg.mentions.repliedUser === null){
+							const i = history.length-1;
+							const content = history[i].content;
+							history[i].content = content + '\n\n' + msg.content;
+
+						} else
+							history.push({ 'role': msg.author.bot ? 'assistant' : 'user', 'content': msg.content })
+					}
+				}
+				console.log(history);
+
+				let r;
+				try{
+					r = await this.gptService.ask(history);
+				}catch (e){
+					await msg.reply('[#]Error: ' + e.message)
+					return;
+				}
+				const {response, tokens} = r;
 
 				console.log(response.length);
+				console.log(tokens);
 
 				if (response.length < 2000)
 					await generationMsg.edit(response);
@@ -60,7 +101,7 @@ export class DsBotService {
 						currentMsgBlockLength += v.length;
 
 						const i = messageBlocks.length - 1;
-						if (currentMsgBlockLength > 1800) {
+						if (currentMsgBlockLength > 1500) {
 							const multilines = messageBlocks[i].match(/```/g);
 							const multilineCount = multilines ? multilines.length : 0;
 
@@ -86,6 +127,7 @@ export class DsBotService {
 							await msg.channel.send(v);
 					}
 				}
+				if (tokens > 3500) msg.channel.send(`[x]Tokens: ${tokens}. Conversation closed.`)
 				this.generating = false;
 			}
 		});
@@ -93,19 +135,5 @@ export class DsBotService {
 
 	async init() {
 		await this.client.login(process.env.BOT_TOKEN);
-
-		// const channel = await this.client.channels.fetch('1087790921992642742') as TextChannel;
-
-		// const row = new ActionRowBuilder<ButtonBuilder>()
-		// 	.addComponents(
-		// 		new ButtonBuilder()
-		// 			.setCustomId('createConversation')
-		// 			.setLabel('Create conversation')
-		// 			.setStyle(ButtonStyle.Primary),
-		// 	);
-		// await channel.send({
-		// 	content: 'q',
-		// 	components: [row],
-		// });
 	}
 }

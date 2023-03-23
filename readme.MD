@@ -1,0 +1,1 @@
+ChatGPT discord bot that I created for myself. it's built on **Nest.js**, **Discord.js**, **openAPI** and includes history and non-history chat functionality.

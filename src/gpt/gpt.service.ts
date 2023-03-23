@@ -13,17 +13,13 @@ export class GptService {
 		this.openai = new OpenAIApi(configuration);
 	}
 
-	async ask(msg: string): Promise<string> {
-		const messages = [
-			{ 'role': 'system', 'content': 'You are a helpful assistant.' },
-		];
-		messages.push({ 'role': 'user', 'content': msg });
-
+	async ask(history: object[]): Promise<{response: string, tokens: number}> {
 		const response = await this.openai.createChatCompletion(<CreateChatCompletionRequest>{
 			model: 'gpt-3.5-turbo-0301',
-			messages: messages,
+			messages: history
 		});
+		console.log(response.data.usage);
 
-		return response.data.choices[0].message.content;
+		return { response: response.data.choices[0].message.content, tokens: response.data.usage.total_tokens };
 	}
 }

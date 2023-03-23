@@ -1,10 +1,7 @@
-import { Module, OnApplicationBootstrap, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DsBotModule } from './dsbot/dsBot.module';
 import { DsBotService } from './dsbot/dsBot.service';
-import { config } from 'dotenv';
-
-config();
 
 @Module({
 	imports: [ConfigModule.forRoot({
